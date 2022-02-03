@@ -177,6 +177,13 @@ export interface Identifier {
   name: string
 }
 
+export interface ImportedIdentifier {
+  kind: 'ImportedIdentifier'
+  name: string
+  from: string
+  as?: string
+}
+
 export type BasicType =
   | StringType
   | NumberType
@@ -191,7 +198,7 @@ export type BasicType =
   | FunctionType
   | UnknownType
 
-export type TypeReference = BasicType | Combinator | Identifier
+export type TypeReference = BasicType | Combinator | Identifier | ImportedIdentifier
 
 export interface TypeDeclaration extends Readonly {
   kind: 'TypeDeclaration'
@@ -199,6 +206,7 @@ export interface TypeDeclaration extends Readonly {
   type: TypeReference
   isExported: boolean
   description?: string
+  filePath?: string
 }
 
 export interface CustomTypeDeclaration {
@@ -207,6 +215,7 @@ export interface CustomTypeDeclaration {
   static: string
   runtime: string
   dependencies: Array<string>
+  filePath?: string
 }
 
 export interface CustomCombinator {
@@ -298,6 +307,15 @@ export function identifier(name: string): Identifier {
   return {
     kind: 'Identifier',
     name
+  }
+}
+
+export function importedIdentifier(name: string, from: string, as?: string): ImportedIdentifier {
+  return {
+    kind: 'ImportedIdentifier',
+    name,
+    from,
+    as
   }
 }
 
@@ -446,7 +464,8 @@ export function typeDeclaration(
   isExported: boolean = false,
   /** @deprecated */
   isReadonly: boolean = false,
-  description?: string
+  description?: string,
+  filePath?: string
 ): TypeDeclaration {
   return {
     kind: 'TypeDeclaration',
@@ -454,7 +473,8 @@ export function typeDeclaration(
     type,
     isExported,
     isReadonly,
-    description
+    description,
+    filePath
   }
 }
 
@@ -462,14 +482,16 @@ export function customTypeDeclaration(
   name: string,
   staticRepr: string,
   runtimeRepr: string,
-  dependencies: Array<string> = []
+  dependencies: Array<string> = [],
+  filePath?: string
 ): CustomTypeDeclaration {
   return {
     kind: 'CustomTypeDeclaration',
     name,
     static: staticRepr,
     runtime: runtimeRepr,
-    dependencies
+    dependencies,
+    filePath
   }
 }
 
@@ -579,6 +601,7 @@ const flatten = <A>(aas: Array<Array<A>>): Array<A> => {
 export const getNodeDependencies = (node: Node): Array<string> => {
   switch (node.kind) {
     case 'Identifier':
+    case 'ImportedIdentifier':
       return [node.name]
     case 'InterfaceCombinator':
     case 'StrictCombinator':
@@ -630,6 +653,69 @@ export function getTypeDeclarationGraph(declarations: Array<TypeDeclaration | Cu
     vertex.afters.push(...getNodeDependencies(d))
   })
   return graph
+}
+
+export type NodeImports = Record<string, Set<string>>
+
+export function getNodesImports(nodes: Node[]): NodeImports {
+  const importedIdentifiers = flatten(nodes.map(getNodeImportedIdentifiers))
+  const res: NodeImports = {}
+
+  importedIdentifiers.forEach(i => {
+    const name = `${i.name}${i.as == null ? '' : ` as ${i.as}`}`
+
+    /* istanbul ignore else */
+    if (res[i.from] == null) {
+      res[i.from] = new Set()
+    }
+
+    res[i.from].add(name)
+  })
+
+  return res
+}
+
+function getNodeImportedIdentifiers(node: Node): ImportedIdentifier[] {
+  switch (node.kind) {
+    case 'ImportedIdentifier':
+      return [node]
+    case 'InterfaceCombinator':
+    case 'StrictCombinator':
+    case 'PartialCombinator':
+      return flatten(node.properties.map(p => getNodeImportedIdentifiers(p.type)))
+    case 'UnionCombinator':
+    case 'TaggedUnionCombinator':
+    case 'IntersectionCombinator':
+    case 'TupleCombinator':
+      return flatten(node.types.map(getNodeImportedIdentifiers))
+    case 'DictionaryCombinator':
+      return getNodeImportedIdentifiers(node.domain).concat(getNodeImportedIdentifiers(node.codomain))
+    case 'ArrayCombinator':
+    case 'ReadonlyArrayCombinator':
+    case 'TypeDeclaration':
+    case 'RecursiveCombinator':
+    case 'ExactCombinator':
+    case 'ReadonlyCombinator':
+    case 'BrandCombinator':
+      return getNodeImportedIdentifiers(node.type)
+    case 'StringType':
+    case 'NumberType':
+    case 'BooleanType':
+    case 'NullType':
+    case 'UndefinedType':
+    case 'IntegerType':
+    case 'IntType':
+    case 'AnyArrayType':
+    case 'AnyDictionaryType':
+    case 'FunctionType':
+    case 'LiteralCombinator':
+    case 'KeyofCombinator':
+    case 'UnknownType':
+    case 'Identifier':
+    case 'CustomTypeDeclaration':
+    case 'CustomCombinator':
+      return []
+  }
 }
 
 function indent(n: number): string {
@@ -839,6 +925,7 @@ function printRuntimeDictionaryCombinator(c: DictionaryCombinator, i: number): s
 export function printRuntime(node: Node, i: number = 0): string {
   switch (node.kind) {
     case 'Identifier':
+    case 'ImportedIdentifier':
       return node.name
     case 'StringType':
     case 'NumberType':
@@ -1089,6 +1176,7 @@ function printStaticTypeDeclaration(declaration: TypeDeclaration): string {
 export function printStatic(node: Node, i: number = 0, recursion?: Recursion): string {
   switch (node.kind) {
     case 'Identifier':
+    case 'ImportedIdentifier':
       if (recursion) {
         if (node.name === recursion.name) {
           return recursion.output ? node.name + 'Output' : node.name
