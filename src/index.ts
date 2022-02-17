@@ -141,7 +141,7 @@ export interface TupleCombinator {
 
 export interface RecursiveCombinator {
   kind: 'RecursiveCombinator'
-  typeParameter: Identifier
+  typeParameter: Identifier | ImportedIdentifier
   name: string
   type: TypeReference
 }
@@ -434,7 +434,7 @@ export function tupleCombinator(types: Array<TypeReference>, name?: string): Tup
   }
 }
 
-export function recursiveCombinator(typeParameter: Identifier, name: string, type: TypeReference): RecursiveCombinator {
+export function recursiveCombinator(typeParameter: Identifier | ImportedIdentifier, name: string, type: TypeReference): RecursiveCombinator {
   return {
     kind: 'RecursiveCombinator',
     typeParameter,
